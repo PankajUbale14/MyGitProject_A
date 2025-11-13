@@ -1,31 +1,27 @@
 import asyncio
 import websockets
-
-active_connections = {}
-
-async def connection_handler(websocket, path):
-    user_ID = None
-    try:
-        user_ID = await websocket.recv()
-        active_connections[user_ID] = websocket
-        print(f" Connected: {user_ID}. (Total: {len(active_connections)})")
-        await websocket.send(f"Welcome, {user_ID}!")
+import json
+# this is client 
+async def connect_and_identify():
+    uri = "ws://localhost:8765"
+    async with websockets.connect(uri) as websocket:
+        # Send our User ID as the first message
+        my_id = "Pankaj" 
+        await websocket.send(json.dumps({"user_id": my_id}))
         
-        async for message in websocket:
-            await websocket.send(f"Server echoes: {message}")
-            
-    except websockets.exceptions.ConnectionClosed:
-        pass 
-    finally:
-        
-        if user_ID in active_connections:
-            del active_connections[user_ID]
-            print(f" Disconnected: {user_ID}. (Total: {len(active_connections)})")
+        # Wait for the server
+        response = await websocket.recv()
+        print(f"< Server: {response}")
 
-async def main():
-    async with websockets.serve(connection_handler, "localhost", 8765):
-        print("Server started on ws://localhost:8765")
-        await asyncio.Future()
+        # SEND A NORMAL MESSAGE
+        await websocket.send("Hello from the client!")
+        
+        # Get the response
+        response = await websocket.recv()
+        print(f"< Server: {response}")
+
+        # Keep connection open for a bit
+        await asyncio.sleep(10)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(connect_and_identify())
