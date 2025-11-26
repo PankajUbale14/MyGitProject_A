@@ -1,50 +1,60 @@
-import asyncio
-import websockets
-import json
-#this is server 
-connected_clients = {}
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from typing import List, Dict
 
-async def handle_connection(websocket, path):
-    """
-    This function is called for each new client that connects.
-    """
-    user_id = None
-    try:
+app = FastAPI()
 
-        first_message = await websocket.recv()
-        data = json.loads(first_message)
+# --- 1. The Connection Manager ---
+class ConnectionManager:
+    def __init__(self):
+       
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, room_name: str):
+        
+        await websocket.accept()
         
         
-        if 'user_id' in data:
-            user_id = data['user_id']  
-            connected_clients[user_id] = websocket
-            print(f" New connection: {user_id} has joined.")
-            print(f"   Total active users: {list(connected_clients.keys())}")
+        if room_name not in self.active_connections:
+            self.active_connections[room_name] = []
             
-            await websocket.send(json.dumps({"status": "success", "message": f"Welcome {user_id}!"}))
-        else:
-            await websocket.send(json.dumps({"status": "error", "message": "User ID is required."}))
-            await websocket.close()
-            return
+       
+        self.active_connections[room_name].append(websocket)
+        print(f"Client joined room: {room_name}")
 
-        async for message in websocket:
-            print(f"Message from {user_id}: {message}")
-            await websocket.send(f"Server received your message: {message}")
+    def disconnect(self, websocket: WebSocket, room_name: str):
+        
+        if room_name in self.active_connections:
+            self.active_connections[room_name].remove(websocket)
+           
+            if not self.active_connections[room_name]:
+                del self.active_connections[room_name]
+        print(f"Client left room: {room_name}")
 
-    except websockets.exceptions.ConnectionClosed:
-        print(f"Connection lost with {user_id}.")
+    async def broadcast_to_room(self, message: str, room_name: str):
+        
+        if room_name in self.active_connections:
+            for connection in self.active_connections[room_name]:
+                await connection.send_text(message)
+
+
+manager = ConnectionManager()
+
+#The WebSocket Endpoint ---
+@app.websocket("/ws/{room_name}/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, room_name: str, client_id: int):
     
-    finally:
-        if user_id in connected_clients:
-            del connected_clients[user_id]
-            print(f" Disconnected: {user_id} has left.")
-            print(f"   Total active users: {list(connected_clients.keys())}")
-
-# START THE SERVER
-async def main():
-    print("Starting WebSocket server on ws://localhost:8765")
-    async with websockets.serve(handle_connection, "localhost", 8765):
-        await asyncio.Future()  
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    await manager.connect(websocket, room_name)
+    
+    try:
+        
+        await manager.broadcast_to_room(f"Client #{client_id} has joined the chat", room_name)
+        
+        # Keep the connection open and listen for messages
+        while True:
+            data = await websocket.receive_text()
+            # Send message only to users in the same room
+            await manager.broadcast_to_room(f"Client #{client_id}: {data}", room_name)
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, room_name)
+        await manager.broadcast_to_room(f"Client #{client_id} left the chat", room_name)
