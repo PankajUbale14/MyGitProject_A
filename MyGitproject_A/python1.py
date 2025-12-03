@@ -1,9 +1,15 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from typing import List, Dict
 
 app = FastAPI()
 
-# --- 1. The Connection Manager ---
+#  data model
+class NotificationSchema(BaseModel):
+    message:str
+    target_room:str
+
+# The Connection Manager ---
 class ConnectionManager:
     def __init__(self):
        
@@ -16,19 +22,9 @@ class ConnectionManager:
         
         if room_name not in self.active_connections:
             self.active_connections[room_name] = []
-            
-       
+
         self.active_connections[room_name].append(websocket)
         print(f"Client joined room: {room_name}")
-
-    def disconnect(self, websocket: WebSocket, room_name: str):
-        
-        if room_name in self.active_connections:
-            self.active_connections[room_name].remove(websocket)
-           
-            if not self.active_connections[room_name]:
-                del self.active_connections[room_name]
-        print(f"Client left room: {room_name}")
 
     async def broadcast_to_room(self, message: str, room_name: str):
         
@@ -40,21 +36,14 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 #The WebSocket Endpoint ---
-@app.websocket("/ws/{room_name}/{client_id}")
+@app.websocket("/ws/{room_name}")
 async def websocket_endpoint(websocket: WebSocket, room_name: str, client_id: int):
     
     await manager.connect(websocket, room_name)
     
     try:
-        
-        await manager.broadcast_to_room(f"Client #{client_id} has joined the chat", room_name)
-        
-        # Keep the connection open and listen for messages
         while True:
-            data = await websocket.receive_text()
-            # Send message only to users in the same room
-            await manager.broadcast_to_room(f"Client #{client_id}: {data}", room_name)
+            await websocket.receive_text()
             
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_name)
-        await manager.broadcast_to_room(f"Client #{client_id} left the chat", room_name)
